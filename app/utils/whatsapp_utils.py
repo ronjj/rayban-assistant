@@ -3,7 +3,7 @@ from flask import current_app, jsonify
 import json
 import requests
 
-# from app.services.openai_service import generate_response
+from app.services.openai_service import generate_response
 import re
 
 
@@ -25,10 +25,40 @@ def get_text_message_input(recipient, text):
     )
 
 
-def generate_response(response):
-    # Return text in uppercase
-    return response.upper()
+model = 'llama3.2'
 
+def generate(prompt, context):
+    try:
+        r = requests.post('http://localhost:11434/api/generate',
+                          json={
+                              'model': model,
+                              'prompt': context + prompt
+                          },
+                          stream=True)
+        r.raise_for_status()
+        print('here')
+
+        full_response = ""
+        for line in r.iter_lines():
+            if line:
+                body = json.loads(line)
+                response_part = body.get('response', '')
+                full_response += response_part
+
+                if 'error' in body:
+                    raise Exception(body['error'])
+
+                if body.get('done', False):
+                    return full_response, body['context']
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error communicating with Ollama: {str(e)}")
+        return "I'm sorry, I'm having trouble processing your request right now.", context
+
+def generate_response(context, message_body):
+    print(f"Generating response for: {message_body}")
+    response, new_context = generate(message_body, context)
+    return response, new_context
 
 def send_message(data):
     headers = {
@@ -82,14 +112,12 @@ def process_whatsapp_message(body):
     message = body["entry"][0]["changes"][0]["value"]["messages"][0]
     message_body = message["text"]["body"]
 
-    # TODO: implement custom function here
-    response = generate_response(message_body)
-
-    # OpenAI Integration
-    # response = generate_response(message_body, wa_id, name)
-    # response = process_text_for_whatsapp(response)
+    context = 'You are a helpful assistant responding to messages from a user'
+    response, new_context = generate_response(context, message_body)
 
     data = get_text_message_input(current_app.config["RECIPIENT_WAID"], response)
+    print(f"response: {response}")
+    print(f"data: {data}")
     send_message(data)
 
 
